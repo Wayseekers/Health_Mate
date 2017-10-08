@@ -1,4 +1,4 @@
-************************************************************
+/************************************************************
 Based on Jim Lindblom @ SparkFun Electronics
 original creation date: November 23, 2016
 https://github.com/sparkfun/SparkFun_MPU9250_DMP_Arduino_Library
