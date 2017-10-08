@@ -1,53 +1,35 @@
-// I2C device class (I2Cdev) demonstration Arduino sketch for MPU6050 class using DMP (MotionApps v2.0)
-// 6/21/2012 by Jeff Rowberg <jeff@rowberg.net>
-// Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
-//
-// Based on the I2Cdev library and previous work by Jeff Rowberg <jeff@rowberg.net>
-
-// These offsets were meant to calibrate MPU6050's internal DMP, but can be also useful for reading sensors. 
-// The effect of temperature has not been taken into account so I can't promise that it will work if you 
-// calibrate indoors and then use it outdoors. Best is to calibrate and use at the same room temperature.
-/* ==========================LICENCE===================================
-I2C device class (I2Cdev) demonstration Arduino sketch for MPU6050 class using DMP (MotionApps v2.0)
-6/21/2012 by Jeff Rowberg <jeff@rowberg.net>
-Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
-
-I2Cdev device library code is placed under the MIT license
-Copyright (c) 2012 Jeff Rowberg
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-=======================================================================
-*/
-
+************************************************************
+Based on Jim Lindblom @ SparkFun Electronics
+original creation date: November 23, 2016
+https://github.com/sparkfun/SparkFun_MPU9250_DMP_Arduino_Library
+Development environment specifics:
+Arduino IDE 1.6.12
+SparkFun 9DoF Razor IMU M0
+Supported Platforms:
+- ATSAMD21 (Arduino Zero, SparkFun SAMD21 Breakouts)
+*************************************************************/
 
 /*========================= Notice ====================================
-* Project name: Heath Mate
-* description: Measuring Exercise Position with MPU6050
-* Version: 0.3
-* Developer: BongO Moon
-* Github Address :
+* Project name: WayFit Prototype
+* description: Measuring Exercise Position with SparkFun 9DoF Razor IMU M0
+* Version: 0.5
+* Developer(Co.Op): BongO Moon, JunHee Lee, HyunGang Nah
+* Github Address : http://github.com/wayseekers/health_mate
 * first date: 2017.08.15
-* last date: 2017.09.13
+* last date: 2017.10.08
+* Development environment specifics:
+    Arduino IDE 1.6.12
+    SparkFun 9DoF Razor IMU M0
+* Supported Platforms:
+  - ATSAMD21 (Arduino Zero, SparkFun SAMD21 Breakouts)
+  - HM-10 Bluetooth 4.0 BLE
 =====================================================================*/
 
-
 // Changelog:
+//      2017-10-01 add bluetooth on WayFit prototype (ver0.5)
+//      2017-09-25 change brand name from healthmate to WayFit
+//      2017-09-18 prepare to add Blutooth
+//      2017-09-17 Change IMU sensor from MPU6050 to MPU9250 (ver 0.4)
 //      2017-09-13 Complete second prototype for sensing biceps-carl exercise(ver0.3)
 //      2017-09-12 Try to calculate two Quaternion size
 //      2017-09-11 Exclude calibration code written by luis
@@ -56,229 +38,207 @@ THE SOFTWARE.
 //      2017-08-26 Refer to prototype-code written by DaeJangJangE
 //      2017-08-15 Include library for MPU6050 class using DMP(ver0.1)
 
-
-#include "I2Cdev.h"
-#include "MPU6050_6Axis_MotionApps20.h"
-// Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
-// is used in I2Cdev.h
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-#include "Wire.h"
-#endif
-
 /* ==============================CONFIGURATION===================================
-*  MCU - Arduino Nano(ATmega328P)
+*  MCU - SparkFun 9DoF Razor IMU M0
 *  GND
-*  VCC = 5V
-*  INT = D2 //interrupt pin for DMP(Digital Motion Processor) && this sketch depends on the MPU-6050's INT pin being connected to the Arduino's external interrupt #0 pin
-*  BTTX =
-*  BTRX =
-*  SDA = A4
-*  SCL = A5
+*  VCC = 3.3V
+*  RX = TXD
+*  TX = RXD
 * ==============================================================================*/
+#include "SparkFunMPU9250-DMP.h"
 
-// class default I2C address is 0x68
-// specific I2C addresses may be passed as a parameter here
-// AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
-// AD0 high = 0x69
-MPU6050 mpu;
-//MPU6050 mpu(0x69); // <-- use for AD0 high
+#define M0Serial SerialUSB
+#define BTSerial Serial1
 
-/* =========================================================================
-NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
-depends on the MPU-6050's INT pin being connected to the Arduino's
-external interrupt #0 pin. On the Arduino Uno and Mega 2560, this is
-digital I/O pin 2.
-* ========================================================================= */
+MPU9250_DMP imu;
 
-#define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
+String str="";
 
-// MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
-
-            // orientation/motion vars
-Quaternion q1;           // [w, x, y, z]         quaternion container
-Quaternion q2;           // [w, x, y, z]         quaternion container
-double r;
-int flag = 0;
-int exer_check = 0;
-
-// ================================================================
-// ===               INTERRUPT DETECTION ROUTINE                ===
-// ================================================================
-
-volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-void dmpDataReady() {
-  mpuInterrupt = true;
-}
-
+int exercise_state = 0;
+int check_data;         // only check stabilization data
+float w, x, y, z;       // Quaternion Reference Point Value
+float exer_w, exer_x, exer_y, exer_z;   // Qauternion Exercise Point Value
+double q_product;       // Quaternion Vector Product Value
 
 
 // ================================================================
 // ===                      INITIAL SETUP                       ===
 // ================================================================
-
 void setup() {
-  // join I2C bus (I2Cdev library doesn't do this automatically)
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-  Wire.begin();
-  Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
-#elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-  Fastwire::setup(400, true);
-#endif
-
-  // initialize serial communication
-  // (115200 chosen because it is required for Teapot Demo output, but it's
-  // really up to you depending on your project)
-  Serial.begin(115200);
-  while (!Serial); // wait for Leonardo enumeration, others continue immediately
-
-           // NOTE: 8MHz or slower host processors, like the Teensy @ 3.3v or Ardunio
-           // Pro Mini running at 3.3v, cannot handle this baud rate reliably due to
-           // the baud timing being too misaligned with processor ticks. You must use
-           // 38400 or slower in these cases, or use some kind of external separate
-           // crystal solution for the UART timer.
-
-           // initialize device
-  Serial.println(F("Initializing I2C devices..."));
-  mpu.initialize();
-  pinMode(INTERRUPT_PIN, INPUT);
-
-  // verify connection
-  Serial.println(F("Testing device connections..."));
-  Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-  // wait for ready
-  Serial.println(F("\nSend any character to begin DMP programming and demo: "));
-  while (Serial.available() && Serial.read()); // empty buffer
-  while (!Serial.available());                 // wait for data
-  while (Serial.available() && Serial.read()); // empty buffer again
-
-                         // load and configure the DMP
-  Serial.println(F("Initializing DMP..."));
-  devStatus = mpu.dmpInitialize();
-
-  // supply your own gyro offsets here, scaled for min sensitivity
-  mpu.setXGyroOffset(220);
-  mpu.setYGyroOffset(76);
-  mpu.setZGyroOffset(-85);
-  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
-
-                 // make sure it worked (returns 0 if so)
-  if (devStatus == 0) {
-    // turn on the DMP, now that it's ready
-    Serial.println(F("Enabling DMP..."));
-    mpu.setDMPEnabled(true);
-
-    // enable Arduino interrupt detection
-    Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)..."));
-    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
-    mpuIntStatus = mpu.getIntStatus();
-
-    // set our DMP Ready flag so the main loop() function knows it's okay to use it
-    Serial.println(F("DMP ready! Waiting for first interrupt..."));
-    dmpReady = true;
-
-    // get expected DMP packet size for later comparison
-    packetSize = mpu.dmpGetFIFOPacketSize();
+  M0Serial.begin(115200);
+  BTSerial.begin(9600);
+  
+  // Call imu.begin() to verify communication and initialize
+  if (imu.begin() != INV_SUCCESS) {
+    while (1) {
+      M0Serial.println("Unable to communicate with MPU-9250");
+      M0Serial.println("Check connections, and try again.");
+      M0Serial.println();
+      delay(5000);
+    }
   }
-  else {
-    // ERROR!
-    // 1 = initial memory load failed
-    // 2 = DMP configuration updates failed
-    // (if it's going to break, usually the code will be 1)
-    Serial.print(F("DMP Initialization failed (code "));
-    Serial.print(devStatus);
-    Serial.println(F(")"));
+
+  imu.dmpBegin(DMP_FEATURE_6X_LP_QUAT | // Enable 6-axis quat
+    DMP_FEATURE_GYRO_CAL, // Use gyro calibration
+    10); // Set DMP FIFO rate to 10 Hz
+       // DMP_FEATURE_LP_QUAT can also be used. It uses the 
+       // accelerometer in low-power mode to estimate quat's.
+       // DMP_FEATURE_LP_QUAT and 6X_LP_QUAT are mutually exclusive
+       
+  //Stabilize IMU Data(case 100) after turn on the device    
+  while(check_data != 100){
+   initValueStabilization();
   }
+  
+  M0Serial.println("bluetooth Connection Wait......");  
+  while(true){
+    if(BTSerial.available()){
+      BTSerial.read();
+      break;
+    }
+  }
+  
+  M0Serial.println("WayFit Start!!"); 
 }
-
 
 
 // ================================================================
 // ===                    MAIN PROGRAM LOOP                     ===
 // ================================================================
+/*
+void loop() {
+  while(BTSerial.available()) {                    //블루투스 수신내용이 있을 경우 수신
+    char c = (char)BTSerial.read();
+    str+=c;
+    delay(5);
+  }
+  
+  if(!str.equals(""))                              //수신된 정보가 있을 경우
+  {
+    M0Serial.println("input value: "+str);
+    //start exercise
+    while (str.equals("start")){
+      exercise_mode();
+      M0Serial.println("start exercise.....");
+    }
+    //finish exercise or stop exercise
+    if(str.equals("end")){
+      exercise_state = 0;
+      M0Serial.println("wait to select exercise.....");     
+    }
+    str="";
+  }
+}
+*/
 
 void loop() {
-  // if programming failed, don't try to do anything
-  if (!dmpReady) return;
-
-  // wait for MPU interrupt or extra packet(s) available
-  while (!mpuInterrupt && fifoCount < packetSize) {
-    // other program behavior stuff here
-    // .
-    // .
-    // .
-    // if you are really paranoid you can frequently test in between other
-    // stuff to see if mpuInterrupt is true, and if so, "break;" from the
-    // while() loop to immediately process the MPU data
-    // .
-    // .
-    // .
-  }
-
-  // reset interrupt flag and get INT_STATUS byte
-  mpuInterrupt = false;
-  mpuIntStatus = mpu.getIntStatus();
-
-  // get current FIFO count
-  fifoCount = mpu.getFIFOCount();
-
-  // check for overflow (this should never happen unless our code is too inefficient)
-  if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
-    // reset so we can continue cleanly
-    mpu.resetFIFO();
-    Serial.println(F("FIFO overflow!"));
-
-    // otherwise, check for DMP data ready interrupt (this should happen frequently)
-  }
-  else if (mpuIntStatus & 0x02) {
-    // wait for correct available data length, should be a VERY short wait
-    while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
-
-    // read a packet from FIFO
-    mpu.getFIFOBytes(fifoBuffer, packetSize);
-
-    // track FIFO count here in case there is > 1 packet available
-    // (this lets us immediately read more without waiting for an interrupt)
-    fifoCount -= packetSize;
-
-    // display quaternion values in easy matrix form: w x y z
-    //calibrate dmp's quaternion data(2500 case)
-    if (flag < 2500) {
-      mpu.dmpGetQuaternion(&q1, fifoBuffer);
-      Serial.print("quat\t");
-      Serial.print(q1.w);
-      Serial.print("\t");
-      Serial.print(q1.x);
-      Serial.print("\t");
-      Serial.print(q1.y);
-      Serial.print("\t");
-      Serial.println(q1.z);
-      flag++;
-    }
-    else if (flag == 2500) {
-      mpu.dmpGetQuaternion(&q2, fifoBuffer);
-      r = q1.w*q2.w + q1.x*q2.x + q1.y*q2.y + q1.z*q2.z;
-      //Serial.println(r);
-      if (r <= 1.00 && r >= 0.95 && exer_check == 0) {
-        Serial.println("exercise start!!!!!!");
-        exer_check++;
-
+  // Check for new data in the FIFO
+  if (imu.fifoAvailable()) {
+    // Use dmpUpdateFifo to update the ax, gx, mx, etc. values
+    if (imu.dmpUpdateFifo() == INV_SUCCESS) {
+      if(exercise_state == 0){
+        w = imu.calcQuat(imu.qw);
+        x = imu.calcQuat(imu.qx);
+        y = imu.calcQuat(imu.qy);
+        z = imu.calcQuat(imu.qz);
+        M0Serial.println("Q: " + String(w, 4) + ", " + String(x, 4) + ", " + String(y, 4) + ", " + String(z, 4));  
+      
+        while(BTSerial.available()) {                  
+          char c = (char)BTSerial.read();
+          str+=c;                          
+          delay(5);
+        }
+        if(!str.equals("")){
+          M0Serial.println("input value: "+str);     
+          if(str.equals("start")){
+            w = imu.calcQuat(imu.qw);
+            x = imu.calcQuat(imu.qx);
+            y = imu.calcQuat(imu.qy);
+            z = imu.calcQuat(imu.qz);
+            exercise_state = 1;                                
+          }
+          str = "";                            
+        }
       }
-      else if (r <= 0.75 && exer_check == 1) {
-        Serial.println("check!!!!!!!!!!!!!!!");
-        exer_check++;
-      }
+      else if(exercise_state == 1){
+        exer_w = imu.calcQuat(imu.qw);
+        exer_x = imu.calcQuat(imu.qx);
+        exer_y = imu.calcQuat(imu.qy);
+        exer_z = imu.calcQuat(imu.qz);
+        q_product = w*exer_w + x*exer_x + y*exer_y + z*exer_z;
 
-      else if (r <= 1.00 && r >= 0.95 && exer_check == 2) {
-        Serial.println("count!!!!!!!!!!!!!!!!!!");
-        exer_check = 1;
+        BTSerial.print(q_product);
+        BTSerial.print("#");
+        M0Serial.print(q_product);
+        M0Serial.println("#");
+        
+        while(BTSerial.available()) {                  
+          char c = (char)BTSerial.read();
+          str+=c;                          
+          delay(5);
+        }
+        if(!str.equals("")){
+          M0Serial.println("input value: "+str);     
+          if(str.equals("end")){
+            M0Serial.println("wait to select exercise");            
+            exercise_state = 1;                                
+          }
+          str = "";                            
+        }
       }
     }
   }
 }
+
+//Stabilize IMU Data(case 100) after turn on the device
+void initValueStabilization(){
+  // Check for new data in the FIFO
+  if (imu.fifoAvailable()) {
+    // Use dmpUpdateFifo to update the ax, gx, mx, etc. values
+    if (imu.dmpUpdateFifo() == INV_SUCCESS) {
+      // After calling dmpUpdateFifo() the ax, gx, mx, etc. values
+      // are all updated.
+      // Quaternion values are, by default, stored in Q30 long
+      // format. calcQuat turns them into a float between -1 and 1
+      w = imu.calcQuat(imu.qw);
+      x = imu.calcQuat(imu.qx);
+      y = imu.calcQuat(imu.qy);
+      z = imu.calcQuat(imu.qz);
+      M0Serial.println("Q: " + String(w, 4) + ", " + String(x, 4) + ", " + String(y, 4) + ", " + String(z, 4));
+      check_data++;
+    }
+  }
+}
+
+/*
+void exercise_mode() {
+  // Check for new data in the FIFO
+  if (imu.fifoAvailable()) {
+    // Use dmpUpdateFifo to update the ax, gx, mx, etc. values
+    if (imu.dmpUpdateFifo() == INV_SUCCESS) {
+      switch (exercise_state) {
+      case 0: w = imu.calcQuat(imu.qw);
+        x = imu.calcQuat(imu.qx);
+        y = imu.calcQuat(imu.qy);
+        z = imu.calcQuat(imu.qz);
+        exercise_state++;
+        break;
+
+      case 1: exer_w = imu.calcQuat(imu.qw);
+        exer_x = imu.calcQuat(imu.qx);
+        exer_y = imu.calcQuat(imu.qy);
+        exer_z = imu.calcQuat(imu.qz);
+        q_product = w*exer_w + x*exer_x + y*exer_y + z*exer_z;
+
+        BTSerial.print(q_product);
+        BTSerial.print("#");
+        //M0Serial.println(q_product);
+        break;
+        
+      default:
+        break;
+      }
+    }
+  }
+}
+*/
