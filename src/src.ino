@@ -93,7 +93,7 @@ void setup() {
   M0Serial.println("bluetooth Connection Wait......");  
   while(true){
     if(BTSerial.available()){
-      BTSerial.read();
+      //BTSerial.read() 이렇게 하면 맨 처음 보내는 문자가 여기서 읽히게 됨. 때문에 삭제
       break;
     }
   }
@@ -181,7 +181,7 @@ void loop() {
           M0Serial.println("input value: "+str);     
           if(str.equals("end")){
             M0Serial.println("wait to select exercise");            
-            exercise_state = 1;                                
+            exercise_state = 0; //원래 1이였는데, end후엔 값을 송출하지 않는 상태여야 하므로 0으로 바꿈.                               
           }
           str = "";                            
         }
